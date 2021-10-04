@@ -4,20 +4,18 @@ pragma solidity ^0.8.3;
 import "@openzeppelin/contracts/utils/Counters.sol";
 import "@openzeppelin/contracts/security/ReentrancyGuard.sol";
 import "@openzeppelin/contracts/token/ERC721/ERC721.sol";
+import "@openzeppelin/contracts/token/ERC20/IERC20.sol";
+import "@openzeppelin/contracts/access/Ownable.sol";
 
-import "hardhat/console.sol";
-
-contract NFTMarket is ReentrancyGuard {
+contract NFTMarket is ReentrancyGuard, Ownable {
   using Counters for Counters.Counter;
   Counters.Counter private _itemIds;
   Counters.Counter private _itemsSold;
 
-  address payable owner;
-  uint256 listingPrice = 0.025 ether;
+  uint256 listingPrice = 0 ether; // Free listing at start
+  address erc20Contract = '0xb91c05cf30A973a58295C8Db9248D0911CF091E5'; // VALOU
 
-  constructor() {
-    owner = payable(msg.sender);
-  }
+  constructor() {}
 
   struct MarketItem {
     uint itemId;
@@ -40,6 +38,14 @@ contract NFTMarket is ReentrancyGuard {
     uint256 price,
     bool sold
   );
+
+  function setListingPrice(uint256 _listingPrice) external onlyOwner {
+    listingPrice = _listingPrice;
+  }
+
+  function setERC20Contract(address _erc20Contract) external onlyOwner {
+    erc20Contract = _erc20Contract;
+  }
 
   /* Returns the listing price of the contract */
   function getListingPrice() public view returns (uint256) {
@@ -89,14 +95,21 @@ contract NFTMarket is ReentrancyGuard {
     ) public payable nonReentrant {
     uint price = idToMarketItem[itemId].price;
     uint tokenId = idToMarketItem[itemId].tokenId;
-    require(msg.value == price, "Please submit the asking price in order to complete the purchase");
 
-    idToMarketItem[itemId].seller.transfer(msg.value);
+    // Check if the buyer allowed this contract to spend his ERC20 tokens
+    require(IERC20(erc20Contract).allowance(msg.sender, address(this)) >= price, "Allowance problem: not enough fund allowed to buy this nft");
+    // Transfer price amount of ERC20 tokens from buyer to seller
+    require(IERC20(erc20Contract).transferFrom(msg.sender, idToMarketItem[itemId].seller, price), "Problem while transferring ERC20 tokens");
+
+    // DISABLED : We do not pay with ETH/Matic but with ERC20 token instead
+    // require(msg.value == price, "Please submit the asking price in order to complete the purchase");
+    // idToMarketItem[itemId].seller.transfer(msg.value);
+
     IERC721(nftContract).transferFrom(address(this), msg.sender, tokenId);
     idToMarketItem[itemId].owner = payable(msg.sender);
     idToMarketItem[itemId].sold = true;
     _itemsSold.increment();
-    payable(owner).transfer(listingPrice);
+    payable(owner()).transfer(listingPrice); // Useless while fees are at 0
   }
 
   /* Returns all unsold market items */
